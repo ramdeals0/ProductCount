@@ -7,9 +7,10 @@ COPY package.json package-lock.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
 
-RUN npm ci
+# Install only API workspaces; skip mobile peer deps (expo/react-native) pulled by drizzle-orm
+RUN npm ci --omit=peer --workspace=@shopcount/api --workspace=@shopcount/types --include-workspace-root
 RUN npm run build -w @shopcount/types && npm run build -w @shopcount/api
-RUN npm prune --omit=dev
+RUN npm prune --omit=dev --omit=peer
 
 FROM node:20-alpine AS runner
 
