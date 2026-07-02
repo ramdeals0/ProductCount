@@ -1,9 +1,9 @@
 import { View, Text, FlatList } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { useAuthStore } from '../../src/stores';
-import { apiRequest } from '../../src/api/client';
+import { useAuthStore } from '../src/stores';
+import { apiRequest } from '../src/api/client';
 import type { AuditEvent } from '@shopcount/types';
-import { Card } from '../../src/components/ui';
+import { Card } from '../src/components/ui';
 
 export default function AuditHistoryScreen() {
   const { accessToken } = useAuthStore();

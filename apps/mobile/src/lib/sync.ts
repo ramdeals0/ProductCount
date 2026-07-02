@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { eq } from 'drizzle-orm';
 import * as Network from 'expo-network';
 import { getDb } from '../db';
-import { syncQueue, localCountLines, localSessions } from '../db/schema';
+import { syncQueue, localCountLines, localSessions, localProducts, localCategories, localLocations } from '../db/schema';
 import { apiRequest } from '../api/client';
 import { useAuthStore, useSyncStore } from '../stores';
 import type { SyncBatchInput } from '@shopcount/types';
@@ -95,7 +95,6 @@ export async function processSyncQueue() {
 }
 
 export async function cacheProductsFromServer(token: string, storeId: string) {
-  const { localProducts, localCategories, localLocations } = await import('../db/schema');
   const db = getDb();
 
   const [productsRes, categories, locations] = await Promise.all([

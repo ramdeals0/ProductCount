@@ -1,7 +1,8 @@
 import { View, Text, ScrollView, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useAuthStore, useSyncStore } from '../../src/stores';
-import { Card, Button, StatusChip } from '../../src/components/ui';
+import { Card, StatusChip } from '../../src/components/ui';
+import { Button } from '../../src/components/Button';
 import { clearAuth } from '../../src/lib/auth';
 import { processSyncQueue, cacheProductsFromServer } from '../../src/lib/sync';
 import { API_URL, getApiBaseUrl } from '../../src/api/client';
