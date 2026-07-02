@@ -208,6 +208,7 @@ See [docs/API.md](docs/API.md) for full endpoint reference.
 
 ## Documentation
 
+- [Staff Training Guide](docs/TRAINING.md)
 - [Architecture & ER Diagram](docs/ARCHITECTURE.md)
 - [API Endpoint Summary](docs/API.md)
 - [Assumptions](docs/ASSUMPTIONS.md)
