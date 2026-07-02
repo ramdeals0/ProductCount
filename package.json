@@ -1,0 +1,22 @@
+{
+  "name": "shopcount",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @shopcount/api",
+    "dev:mobile": "npm run start -w @shopcount/mobile",
+    "build": "npm run build -w @shopcount/types && npm run build -w @shopcount/api",
+    "test": "npm run test -w @shopcount/api && npm run test -w @shopcount/mobile",
+    "db:generate": "npm run db:generate -w @shopcount/api",
+    "db:migrate": "npm run db:migrate -w @shopcount/api",
+    "db:seed": "npm run db:seed -w @shopcount/api",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
