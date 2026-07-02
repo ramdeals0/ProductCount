@@ -4,7 +4,7 @@ import { useAuthStore, useSyncStore } from '../../src/stores';
 import { Card, Button, StatusChip } from '../../src/components/ui';
 import { clearAuth } from '../../src/lib/auth';
 import { processSyncQueue, cacheProductsFromServer } from '../../src/lib/sync';
-import { API_URL } from '../../src/api/client';
+import { API_URL, getApiBaseUrl } from '../../src/api/client';
 import { useState } from 'react';
 
 export default function SettingsScreen() {
@@ -16,7 +16,7 @@ export default function SettingsScreen() {
 
   const handleTestConnection = async () => {
     try {
-      const res = await fetch(API_URL.replace('/api/v1', '') + '/health');
+      const res = await fetch(`${getApiBaseUrl()}/health`);
       const json = await res.json();
       setApiStatus(json.status === 'ok' ? 'ok' : 'error');
       Alert.alert(
