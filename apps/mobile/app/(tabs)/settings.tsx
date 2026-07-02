@@ -4,6 +4,7 @@ import { useAuthStore, useSyncStore } from '../../src/stores';
 import { Card, Button, StatusChip } from '../../src/components/ui';
 import { clearAuth } from '../../src/lib/auth';
 import { processSyncQueue, cacheProductsFromServer } from '../../src/lib/sync';
+import { API_URL } from '../../src/api/client';
 import { useState } from 'react';
 
 export default function SettingsScreen() {
@@ -11,6 +12,22 @@ export default function SettingsScreen() {
   const { isOnline, pendingCount, lastSyncAt } = useSyncStore();
   const [syncing, setSyncing] = useState(false);
   const [caching, setCaching] = useState(false);
+  const [apiStatus, setApiStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
+
+  const handleTestConnection = async () => {
+    try {
+      const res = await fetch(API_URL.replace('/api/v1', '') + '/health');
+      const json = await res.json();
+      setApiStatus(json.status === 'ok' ? 'ok' : 'error');
+      Alert.alert(
+        json.status === 'ok' ? 'Connected' : 'Connection issue',
+        json.status === 'ok' ? 'API is reachable and healthy.' : 'Unexpected health check response.',
+      );
+    } catch {
+      setApiStatus('error');
+      Alert.alert('Connection failed', 'Could not reach the API. Check your network and EXPO_PUBLIC_API_URL.');
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -55,6 +72,29 @@ export default function SettingsScreen() {
           color="#2563EB"
           bgColor="#DBEAFE"
         />
+      </Card>
+
+      <Text className="text-sm font-semibold text-muted uppercase mb-2 mt-2">API Connection</Text>
+      <Card className="mb-4">
+        <Text className="text-xs text-muted mb-1">Server</Text>
+        <Text className="text-sm text-stone-800 mb-3" selectable>
+          {API_URL}
+        </Text>
+        <View className="flex-row justify-between items-center mb-3">
+          <Text className="text-stone-800">Status</Text>
+          <Text
+            className={
+              apiStatus === 'ok'
+                ? 'text-success font-medium'
+                : apiStatus === 'error'
+                  ? 'text-danger font-medium'
+                  : 'text-muted'
+            }
+          >
+            {apiStatus === 'ok' ? 'Connected' : apiStatus === 'error' ? 'Failed' : 'Not tested'}
+          </Text>
+        </View>
+        <Button title="Test Connection" variant="secondary" onPress={handleTestConnection} size="sm" />
       </Card>
 
       <Text className="text-sm font-semibold text-muted uppercase mb-2 mt-2">Sync & Offline</Text>
