@@ -2,14 +2,15 @@
   "name": "@shopcount/mobile",
   "version": "1.0.0",
   "private": true,
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "eas-build-post-install": "cd ../.. && npm run build -w @shopcount/types"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

@@ -9,6 +9,8 @@
   "scripts": {
     "dev:api": "npm run dev -w @shopcount/api",
     "dev:mobile": "npm run start -w @shopcount/mobile",
+    "web:mobile": "npm run web -w @shopcount/mobile",
+    "start": "npm run dev:mobile",
     "build": "npm run build -w @shopcount/types && npm run build -w @shopcount/api",
     "start:api": "npm run start:prod -w @shopcount/api",
     "start:api:seed": "npm run start:prod:seed -w @shopcount/api",
@@ -27,9 +29,6 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.0",
     "react-native-reanimated": "4.5.0",
-    "react-native-worklets": "0.10.0"
-  },
-  "dependencies": {
     "react-native-worklets": "0.10.0"
   },
   "devDependencies": {

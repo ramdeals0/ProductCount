@@ -10,6 +10,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.shopcount.app",
+      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "ShopCount needs camera access to scan product barcodes during inventory counts."
       }
