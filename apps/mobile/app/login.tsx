@@ -9,6 +9,7 @@ import { login } from '../src/lib/auth';
 import { Button } from '../src/components/Button';
 import { InputField } from '../src/components/ui';
 import { cacheProductsFromServer } from '../src/lib/sync';
+import { API_URL } from '../src/api/client';
 
 export default function LoginScreen() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -32,7 +33,13 @@ export default function LoginScreen() {
       }
       router.replace('/(tabs)/dashboard');
     } catch (err) {
-      Alert.alert('Login Failed', err instanceof Error ? err.message : 'Please try again');
+      const message =
+        err instanceof Error && err.message.includes('Cannot reach the server')
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Please try again';
+      Alert.alert('Login Failed', message);
     } finally {
       setLoading(false);
     }
@@ -81,6 +88,9 @@ export default function LoginScreen() {
 
         <Text className="text-xs text-muted text-center mt-6">
           Demo: staff@desimart.com / password123
+        </Text>
+        <Text className="text-xs text-muted text-center mt-2" selectable>
+          API: {API_URL}
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
