@@ -29,7 +29,14 @@ export default function LoginScreen() {
     try {
       const result = await login(data.email, data.password);
       if (result.user.storeId) {
-        await cacheProductsFromServer(result.tokens.accessToken, result.user.storeId);
+        try {
+          await cacheProductsFromServer(result.tokens.accessToken, result.user.storeId);
+        } catch {
+          Alert.alert(
+            'Offline catalog',
+            'Signed in, but product data could not be downloaded. Use Settings → Refresh Product Cache before counting.',
+          );
+        }
       }
       router.replace('/(tabs)/dashboard');
     } catch (err) {
