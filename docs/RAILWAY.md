@@ -2,6 +2,17 @@
 
 This guide deploys the **ShopCount API** and **PostgreSQL** to [Railway](https://railway.com). The mobile app runs on Expo and connects to the deployed API URL.
 
+## Auto-deploy via GitHub Actions
+
+A workflow at `.github/workflows/deploy-railway.yml` deploys on push to `main`.
+
+**One-time setup** — add this secret to your GitHub repo (Settings → Secrets → Actions):
+
+1. In Railway: open project **shopcount-api** → **Settings** → **Tokens** → **Create Project Token**
+2. In GitHub: add secret `RAILWAY_TOKEN` with that token value
+
+Future pushes to `main` will auto-deploy.
+
 ## Option A: Deploy from GitHub (recommended)
 
 1. **Push this repo to GitHub** (already done if you merged the PR).
