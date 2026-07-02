@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Alert, FlatList, Pressable } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { eq } from 'drizzle-orm';
-import { v4 as uuidv4 } from 'uuid';
+import { generateId } from '../../src/lib/id';
 import { useAuthStore, useCountStore } from '../../src/stores';
 import { getDb } from '../../src/db';
 import { localProducts, localLocations, localCountLines } from '../../src/db/schema';
@@ -61,7 +61,7 @@ export default function ManualCountScreen() {
     setSaving(true);
     const variance = calculateVariance(selectedProduct.expectedQty, qty, selectedProduct.restrictedType);
     const now = new Date().toISOString();
-    const lineId = uuidv4();
+    const lineId = generateId();
 
     const existing = await db.select().from(localCountLines).where(eq(localCountLines.sessionId, sessionId));
     const existingLine = existing.find(

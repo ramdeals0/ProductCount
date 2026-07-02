@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { generateId } from '../lib/id';
 import { eq } from 'drizzle-orm';
 import * as Network from 'expo-network';
 import { getDb } from '../db';
@@ -16,7 +16,7 @@ export async function enqueueSyncItem(params: {
 }) {
   const db = getDb();
   await db.insert(syncQueue).values({
-    id: uuidv4(),
+    id: generateId(),
     operation: params.operation,
     entityType: params.entityType,
     entityId: params.entityId,
