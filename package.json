@@ -10,6 +10,9 @@
     "dev:api": "npm run dev -w @shopcount/api",
     "dev:mobile": "npm run start -w @shopcount/mobile",
     "build": "npm run build -w @shopcount/types && npm run build -w @shopcount/api",
+    "start:api": "npm run start:prod -w @shopcount/api",
+    "start:api:seed": "npm run start:prod:seed -w @shopcount/api",
+    "deploy:railway": "railway up",
     "test": "npm run test -w @shopcount/api && npm run test -w @shopcount/mobile",
     "db:generate": "npm run db:generate -w @shopcount/api",
     "db:migrate": "npm run db:migrate -w @shopcount/api",
@@ -18,5 +21,8 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@railway/cli": "^5.23.3"
   }
 }

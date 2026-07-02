@@ -127,6 +127,19 @@ npm run dev:mobile
 npm test
 ```
 
+## Deploy to Railway
+
+The API is ready to deploy to [Railway](https://railway.com) with the included `Dockerfile`.
+
+**Quick steps:**
+1. Connect this GitHub repo in Railway → **Deploy from GitHub**
+2. Add a **PostgreSQL** database to the project
+3. Reference `DATABASE_URL` on the API service
+4. Set `JWT_SECRET`, `JWT_REFRESH_SECRET`, and `RUN_SEED=true` (first deploy)
+5. Generate a public domain → use as `EXPO_PUBLIC_API_URL`
+
+Full guide: [docs/RAILWAY.md](docs/RAILWAY.md)
+
 ## Platform-Specific TODOs
 
 - [ ] Replace placeholder app icons in `apps/mobile/assets/`

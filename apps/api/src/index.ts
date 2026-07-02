@@ -17,8 +17,8 @@ app.get('/health', (_req, res) => {
 app.use('/api/v1', routes);
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`ShopCount API running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`ShopCount API running on port ${PORT}`);
 });
 
 export default app;

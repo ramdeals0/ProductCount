@@ -1,0 +1,15 @@
+node_modules
+.git
+.expo
+.expo-shared
+apps/mobile
+**/*.log
+.env
+.env.*
+!.env.example
+coverage
+.turbo
+*.tsbuildinfo
+README.md
+docs
+.cursor
