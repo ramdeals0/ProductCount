@@ -1,4 +1,11 @@
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+import Constants from 'expo-constants';
+
+const DEFAULT_API_URL = 'https://productcount.up.railway.app/api/v1';
+
+export const API_URL =
+  process.env.EXPO_PUBLIC_API_URL ??
+  Constants.expoConfig?.extra?.apiUrl ??
+  DEFAULT_API_URL;
 
 export class ApiError extends Error {
   constructor(
@@ -26,11 +33,21 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (options.deviceId) headers['X-Device-Id'] = options.deviceId;
 
   const url = `${API_URL}${path.startsWith('/') ? path : `/${path}`}`;
-  const response = await fetch(url, {
-    method: options.method ?? 'GET',
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: options.method ?? 'GET',
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw new ApiError(
+      'NETWORK_ERROR',
+      `Cannot reach the server at ${API_URL}. Check your internet connection and API URL.`,
+      0,
+    );
+  }
 
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
@@ -58,5 +75,3 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 export function getApiBaseUrl(): string {
   return API_URL.replace(/\/api\/v1\/?$/, '');
 }
-
-export { API_URL };
