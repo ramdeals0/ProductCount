@@ -31,8 +31,7 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy to Railway
-        run: railway up --ci --service shopcount-api
+.github/workflows/deploy-railway.yml
 
       - name: Deployment summary
         if: success()

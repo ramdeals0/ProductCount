@@ -131,14 +131,14 @@ npm test
 
 | Resource | URL |
 |----------|-----|
-| **API** | https://shopcount-api-production.up.railway.app |
-| **Health** | https://shopcount-api-production.up.railway.app/health |
-| **API base** | https://shopcount-api-production.up.railway.app/api/v1 |
+| **API** | https://productcount.up.railway.app |
+| **Health** | https://productcount.up.railway.app/health |
+| **API base** | https://productcount.up.railway.app/api/v1 |
 | **Railway project** | https://railway.com/project/ef579065-578c-4560-af3b-dc663aea1063 |
 
 Mobile app env:
 ```
-EXPO_PUBLIC_API_URL=https://shopcount-api-production.up.railway.app/api/v1
+EXPO_PUBLIC_API_URL=https://productcount.up.railway.app/api/v1
 ```
 
 ## Deploy to Railway
