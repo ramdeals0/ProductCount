@@ -70,15 +70,28 @@ export async function findProducts(params: {
   q?: string;
   categoryId?: string;
   restrictedOnly?: boolean;
+  restrictedType?: string;
+  active?: boolean;
+  includeInactive?: boolean;
   limit?: number;
   offset?: number;
 }) {
-  const conditions = [eq(products.storeId, params.storeId), eq(products.active, true)];
+  const conditions = [eq(products.storeId, params.storeId)];
+  if (params.includeInactive) {
+    // no active filter
+  } else if (params.active !== undefined) {
+    conditions.push(eq(products.active, params.active));
+  } else {
+    conditions.push(eq(products.active, true));
+  }
   if (params.categoryId) conditions.push(eq(products.categoryId, params.categoryId));
   if (params.restrictedOnly) conditions.push(eq(products.restrictedCategory, true));
+  if (params.restrictedType) {
+    conditions.push(eq(products.restrictedType, params.restrictedType as typeof products.restrictedType.enumValues[number]));
+  }
   if (params.q) {
     const term = `%${params.q}%`;
-    conditions.push(or(ilike(products.name, term), ilike(products.sku, term))!);
+    conditions.push(or(ilike(products.name, term), ilike(products.sku, term), ilike(products.barcodePrimary, term))!);
   }
 
   const items = await db
@@ -261,6 +274,57 @@ export async function createUnresolvedScan(params: {
 }) {
   const [scan] = await db.insert(unresolvedScans).values(params).returning();
   return scan;
+}
+
+export async function findCategoryById(id: string) {
+  const [category] = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
+  return category ?? null;
+}
+
+export async function findCategoryBySlug(storeId: string, slug: string) {
+  const [category] = await db
+    .select()
+    .from(categories)
+    .where(and(eq(categories.storeId, storeId), eq(categories.slug, slug)))
+    .limit(1);
+  return category ?? null;
+}
+
+export async function findLocationById(id: string) {
+  const [location] = await db.select().from(locations).where(eq(locations.id, id)).limit(1);
+  return location ?? null;
+}
+
+export async function findProductBySku(storeId: string, sku: string) {
+  const [product] = await db
+    .select()
+    .from(products)
+    .where(and(eq(products.storeId, storeId), eq(products.sku, sku)))
+    .limit(1);
+  return product ?? null;
+}
+
+export async function setProductBarcodes(productId: string, primary: string | null | undefined, alternates: string[]) {
+  await db.delete(productBarcodes).where(eq(productBarcodes.productId, productId));
+
+  const values: Array<{ productId: string; barcode: string; isPrimary: boolean }> = [];
+  if (primary) {
+    values.push({ productId, barcode: primary, isPrimary: true });
+  }
+  for (const barcode of alternates.filter((b) => b && b !== primary)) {
+    values.push({ productId, barcode, isPrimary: false });
+  }
+  if (values.length > 0) {
+    await db.insert(productBarcodes).values(values);
+  }
+}
+
+export async function countProductsInCategory(categoryId: string) {
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(products)
+    .where(eq(products.categoryId, categoryId));
+  return count;
 }
 
 export async function getDashboardStats(storeId: string) {

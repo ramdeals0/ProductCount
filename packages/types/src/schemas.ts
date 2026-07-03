@@ -61,7 +61,7 @@ export const productSchema = z.object({
   expectedQty: z.number().default(0),
   reorderLevel: z.number().default(0),
   active: z.boolean().default(true),
-  imageUrl: z.string().url().nullable().optional(),
+  imageUrl: z.union([z.string().url(), z.literal('')]).nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -293,6 +293,11 @@ export const productSearchSchema = z.object({
   q: z.string().optional(),
   categoryId: z.string().uuid().optional(),
   restrictedOnly: z.coerce.boolean().optional(),
+  restrictedType: z
+    .enum([RestrictedType.NONE, RestrictedType.ALCOHOL, RestrictedType.TOBACCO])
+    .optional(),
+  active: z.coerce.boolean().optional(),
+  includeInactive: z.coerce.boolean().optional(),
   storeId: z.string().uuid(),
   limit: z.coerce.number().min(1).max(100).default(50),
   offset: z.coerce.number().min(0).default(0),
