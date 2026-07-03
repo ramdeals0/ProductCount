@@ -7,10 +7,16 @@ import {
   type CreateCountSessionInput,
   type UpsertCountLineInput,
   type SyncBatchInput,
+  type CreateProductInput,
+  type CreateCategoryInput,
+  type UpdateCategoryInput,
+  type CreateLocationInput,
+  type UpdateLocationInput,
+  type ProductImportRequest,
 } from '@shopcount/types';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { countLines, countSessions, products, users, auditEvents } from '../db/schema.js';
+import { countLines, countSessions, products, users, auditEvents, categories, locations } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import {
   signAccessToken,
@@ -34,7 +40,6 @@ import {
   getProductBarcodes,
   findProducts,
   findCategories,
-  findLocations,
   findSessions,
   findCountLines,
   findAuditEvents,
@@ -42,6 +47,12 @@ import {
   recordSyncEvent,
   createUnresolvedScan,
   getDashboardStats,
+  findCategoryById,
+  findCategoryBySlug,
+  findLocationById,
+  findProductBySku,
+  setProductBarcodes,
+  countProductsInCategory,
 } from '../repositories/index.js';
 
 function toAuthUser(user: typeof users.$inferSelect) {
@@ -148,12 +159,429 @@ export async function lookupBarcode(storeId: string, barcode: string) {
   return matches.map(serializeProduct);
 }
 
+export async function createProduct(
+  userId: string,
+  input: CreateProductInput,
+  deviceId?: string,
+) {
+  const existing = await findProductBySku(input.storeId, input.sku);
+  if (existing) throw new AppError(409, 'SKU_EXISTS', 'Product SKU already exists');
+
+  const category = await findCategoryById(input.categoryId);
+  if (!category || category.storeId !== input.storeId) {
+    throw new AppError(400, 'INVALID_CATEGORY', 'Category not found for this store');
+  }
+
+  const restrictedType = input.restrictedType ?? 'none';
+  const restrictedCategory = input.restrictedCategory ?? restrictedType !== 'none';
+
+  const [product] = await db
+    .insert(products)
+    .values({
+      storeId: input.storeId,
+      sku: input.sku,
+      name: input.name,
+      categoryId: input.categoryId,
+      subcategory: input.subcategory ?? null,
+      brand: input.brand ?? null,
+      unitType: input.unitType ?? 'each',
+      barcodePrimary: input.barcodePrimary ?? null,
+      restrictedCategory,
+      restrictedType,
+      expectedQty: input.expectedQty ?? 0,
+      reorderLevel: input.reorderLevel ?? 0,
+      active: input.active ?? true,
+      imageUrl: input.imageUrl || null,
+    })
+    .returning();
+
+  await setProductBarcodes(product.id, input.barcodePrimary, input.barcodeAlternates ?? []);
+
+  await createAuditEvent({
+    entityType: EntityType.PRODUCT,
+    entityId: product.id,
+    action: AuditAction.PRODUCT_UPDATED,
+    userId,
+    deviceId,
+    newValue: { sku: product.sku, name: product.name, action: 'created' },
+  });
+
+  return getProduct(product.id);
+}
+
+export async function updateProduct(
+  id: string,
+  userId: string,
+  updates: Partial<CreateProductInput>,
+  deviceId?: string,
+) {
+  const existing = await findProductById(id);
+  if (!existing) throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Product not found');
+
+  if (updates.sku && updates.sku !== existing.sku) {
+    const dup = await findProductBySku(existing.storeId, updates.sku);
+    if (dup) throw new AppError(409, 'SKU_EXISTS', 'Product SKU already exists');
+  }
+
+  if (updates.categoryId) {
+    const category = await findCategoryById(updates.categoryId);
+    if (!category || category.storeId !== existing.storeId) {
+      throw new AppError(400, 'INVALID_CATEGORY', 'Category not found for this store');
+    }
+  }
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (updates.sku !== undefined) patch.sku = updates.sku;
+  if (updates.name !== undefined) patch.name = updates.name;
+  if (updates.categoryId !== undefined) patch.categoryId = updates.categoryId;
+  if (updates.subcategory !== undefined) patch.subcategory = updates.subcategory;
+  if (updates.brand !== undefined) patch.brand = updates.brand;
+  if (updates.unitType !== undefined) patch.unitType = updates.unitType;
+  if (updates.barcodePrimary !== undefined) patch.barcodePrimary = updates.barcodePrimary;
+  if (updates.restrictedType !== undefined) patch.restrictedType = updates.restrictedType;
+  if (updates.restrictedCategory !== undefined) patch.restrictedCategory = updates.restrictedCategory;
+  if (updates.expectedQty !== undefined) patch.expectedQty = updates.expectedQty;
+  if (updates.reorderLevel !== undefined) patch.reorderLevel = updates.reorderLevel;
+  if (updates.active !== undefined) patch.active = updates.active;
+  if (updates.imageUrl !== undefined) patch.imageUrl = updates.imageUrl || null;
+
+  if (updates.restrictedType !== undefined && updates.restrictedCategory === undefined) {
+    patch.restrictedCategory = updates.restrictedType !== 'none';
+  }
+
+  const [product] = await db
+    .update(products)
+    .set(patch as typeof products.$inferInsert)
+    .where(eq(products.id, id))
+    .returning();
+
+  if (updates.barcodePrimary !== undefined || updates.barcodeAlternates !== undefined) {
+    await setProductBarcodes(
+      id,
+      updates.barcodePrimary ?? product.barcodePrimary,
+      updates.barcodeAlternates ?? (await getProductBarcodes(id)).filter((b) => !b.isPrimary).map((b) => b.barcode),
+    );
+  }
+
+  await createAuditEvent({
+    entityType: EntityType.PRODUCT,
+    entityId: id,
+    action: AuditAction.PRODUCT_UPDATED,
+    userId,
+    deviceId,
+    oldValue: serializeProduct(existing),
+    newValue: serializeProduct(product),
+  });
+
+  return getProduct(id);
+}
+
+export async function deleteProduct(id: string, userId: string, deviceId?: string) {
+  return updateProduct(id, userId, { active: false }, deviceId);
+}
+
+export async function exportProductsCsv(storeId: string) {
+  const allProducts = await db.select().from(products).where(eq(products.storeId, storeId));
+  const cats = await findCategories(storeId);
+  const catMap = new Map(cats.map((c) => [c.id, c.name]));
+
+  const header = 'sku,name,category,subcategory,brand,unitType,barcodePrimary,restrictedCategory,restrictedType,expectedQty,reorderLevel,active,imageUrl';
+  const rows = allProducts.map((p) => {
+      return [
+        csvEscape(p.sku),
+        csvEscape(p.name),
+        csvEscape(catMap.get(p.categoryId) ?? ''),
+        csvEscape(p.subcategory ?? ''),
+        csvEscape(p.brand ?? ''),
+        p.unitType,
+        csvEscape(p.barcodePrimary ?? ''),
+        p.restrictedCategory,
+        p.restrictedType,
+        p.expectedQty,
+        p.reorderLevel,
+        p.active,
+        csvEscape(p.imageUrl ?? ''),
+      ].join(',');
+    });
+
+  return [header, ...rows].join('\n');
+}
+
+function csvEscape(value: string) {
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+export async function importProducts(
+  userId: string,
+  input: ProductImportRequest,
+  deviceId?: string,
+) {
+  const result = {
+    dryRun: input.dryRun,
+    totalRows: input.rows.length,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [] as Array<{ row: number; sku?: string; message: string }>,
+  };
+
+  for (let i = 0; i < input.rows.length; i++) {
+    const row = input.rows[i];
+    const rowNum = i + 1;
+    try {
+      const category = await findCategoryBySlug(input.storeId, row.categorySlug);
+      if (!category) {
+        result.errors.push({ row: rowNum, sku: row.sku, message: `Category slug not found: ${row.categorySlug}` });
+        result.skipped++;
+        continue;
+      }
+
+      const existing = await findProductBySku(input.storeId, row.sku);
+      const alternates = row.barcodeAlternates
+        ? row.barcodeAlternates.split(',').map((b) => b.trim()).filter(Boolean)
+        : [];
+
+      const productData: CreateProductInput = {
+        storeId: input.storeId,
+        sku: row.sku,
+        name: row.name,
+        categoryId: category.id,
+        subcategory: row.subcategory,
+        brand: row.brand,
+        unitType: (row.unitType as CreateProductInput['unitType']) ?? 'each',
+        barcodePrimary: row.barcodePrimary,
+        barcodeAlternates: alternates,
+        restrictedCategory: row.restrictedCategory ?? false,
+        restrictedType: (row.restrictedType as CreateProductInput['restrictedType']) ?? 'none',
+        expectedQty: row.expectedQty ?? 0,
+        reorderLevel: row.reorderLevel ?? 0,
+        active: row.active ?? true,
+        imageUrl: row.imageUrl,
+      };
+
+      if (input.dryRun) {
+        if (existing) result.updated++;
+        else result.created++;
+        continue;
+      }
+
+      if (existing) {
+        await updateProduct(existing.id, userId, productData, deviceId);
+        result.updated++;
+      } else {
+        await createProduct(userId, productData, deviceId);
+        result.created++;
+      }
+    } catch (err) {
+      result.errors.push({
+        row: rowNum,
+        sku: row.sku,
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
+      result.skipped++;
+    }
+  }
+
+  return result;
+}
+
+export async function createCategory(userId: string, input: CreateCategoryInput, deviceId?: string) {
+  const existing = await findCategoryBySlug(input.storeId, input.slug);
+  if (existing) throw new AppError(409, 'SLUG_EXISTS', 'Category slug already exists');
+
+  const [category] = await db
+    .insert(categories)
+    .values({
+      storeId: input.storeId,
+      name: input.name,
+      slug: input.slug,
+      parentId: input.parentId ?? null,
+      restrictedCategory: input.restrictedCategory ?? false,
+      sortOrder: input.sortOrder ?? 0,
+    })
+    .returning();
+
+  await createAuditEvent({
+    entityType: EntityType.PRODUCT,
+    entityId: category.id,
+    action: AuditAction.PRODUCT_UPDATED,
+    userId,
+    deviceId,
+    newValue: { type: 'category', action: 'created', name: category.name },
+  });
+
+  return serializeCategory(category);
+}
+
+export async function updateCategory(
+  id: string,
+  userId: string,
+  updates: UpdateCategoryInput,
+  deviceId?: string,
+) {
+  const existing = await findCategoryById(id);
+  if (!existing) throw new AppError(404, 'CATEGORY_NOT_FOUND', 'Category not found');
+
+  if (updates.slug && updates.slug !== existing.slug) {
+    const dup = await findCategoryBySlug(existing.storeId, updates.slug);
+    if (dup) throw new AppError(409, 'SLUG_EXISTS', 'Category slug already exists');
+  }
+
+  const [category] = await db
+    .update(categories)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(categories.id, id))
+    .returning();
+
+  await createAuditEvent({
+    entityType: EntityType.PRODUCT,
+    entityId: id,
+    action: AuditAction.PRODUCT_UPDATED,
+    userId,
+    deviceId,
+    oldValue: serializeCategory(existing),
+    newValue: serializeCategory(category),
+  });
+
+  return serializeCategory(category);
+}
+
+export async function deleteCategory(id: string, userId: string, deviceId?: string) {
+  const existing = await findCategoryById(id);
+  if (!existing) throw new AppError(404, 'CATEGORY_NOT_FOUND', 'Category not found');
+
+  const count = await countProductsInCategory(id);
+  if (count > 0) {
+    throw new AppError(400, 'CATEGORY_IN_USE', `Category has ${count} products assigned`);
+  }
+
+  await db.delete(categories).where(eq(categories.id, id));
+
+  await createAuditEvent({
+    entityType: EntityType.PRODUCT,
+    entityId: id,
+    action: AuditAction.PRODUCT_UPDATED,
+    userId,
+    deviceId,
+    oldValue: serializeCategory(existing),
+    newValue: { action: 'deleted' },
+  });
+
+  return { deleted: true };
+}
+
+export async function createLocation(userId: string, input: CreateLocationInput, deviceId?: string) {
+  const [location] = await db
+    .insert(locations)
+    .values({
+      storeId: input.storeId,
+      name: input.name,
+      code: input.code,
+      description: input.description ?? null,
+      sortOrder: input.sortOrder ?? 0,
+      active: input.active ?? true,
+    })
+    .returning();
+
+  await createAuditEvent({
+    entityType: EntityType.PRODUCT,
+    entityId: location.id,
+    action: AuditAction.PRODUCT_UPDATED,
+    userId,
+    deviceId,
+    newValue: { type: 'location', action: 'created', name: location.name },
+  });
+
+  return serializeLocation(location);
+}
+
+export async function updateLocation(
+  id: string,
+  userId: string,
+  updates: UpdateLocationInput,
+  deviceId?: string,
+) {
+  const existing = await findLocationById(id);
+  if (!existing) throw new AppError(404, 'LOCATION_NOT_FOUND', 'Location not found');
+
+  const [location] = await db
+    .update(locations)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(locations.id, id))
+    .returning();
+
+  await createAuditEvent({
+    entityType: EntityType.PRODUCT,
+    entityId: id,
+    action: AuditAction.PRODUCT_UPDATED,
+    userId,
+    deviceId,
+    oldValue: serializeLocation(existing),
+    newValue: serializeLocation(location),
+  });
+
+  return serializeLocation(location);
+}
+
+export async function deleteLocation(id: string, userId: string, deviceId?: string) {
+  return updateLocation(id, userId, { active: false }, deviceId);
+}
+
+export async function getCategory(id: string) {
+  const category = await findCategoryById(id);
+  if (!category) throw new AppError(404, 'CATEGORY_NOT_FOUND', 'Category not found');
+  return serializeCategory(category);
+}
+
+export async function getLocation(id: string) {
+  const location = await findLocationById(id);
+  if (!location) throw new AppError(404, 'LOCATION_NOT_FOUND', 'Location not found');
+  return serializeLocation(location);
+}
+
+function serializeCategory(c: typeof categories.$inferSelect) {
+  return {
+    id: c.id,
+    storeId: c.storeId,
+    name: c.name,
+    slug: c.slug,
+    parentId: c.parentId,
+    restrictedCategory: c.restrictedCategory,
+    sortOrder: c.sortOrder,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
+  };
+}
+
+function serializeLocation(l: typeof locations.$inferSelect) {
+  return {
+    id: l.id,
+    storeId: l.storeId,
+    name: l.name,
+    code: l.code,
+    description: l.description,
+    sortOrder: l.sortOrder,
+    active: l.active,
+    createdAt: l.createdAt.toISOString(),
+    updatedAt: l.updatedAt.toISOString(),
+  };
+}
+
 export async function listCategories(storeId: string) {
-  return findCategories(storeId);
+  const items = await findCategories(storeId);
+  return items.map(serializeCategory);
 }
 
 export async function listLocations(storeId: string) {
-  return findLocations(storeId);
+  const items = await db
+    .select()
+    .from(locations)
+    .where(eq(locations.storeId, storeId))
+    .orderBy(locations.sortOrder);
+  return items.map(serializeLocation);
 }
 
 export async function createSession(userId: string, input: CreateCountSessionInput, deviceId?: string) {

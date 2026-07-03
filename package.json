@@ -9,9 +9,10 @@
   "scripts": {
     "dev:api": "npm run dev -w @shopcount/api",
     "dev:mobile": "npm run start -w @shopcount/mobile",
+    "dev:web": "npm run dev -w @shopcount/web",
     "web:mobile": "npm run web -w @shopcount/mobile",
     "start": "npm run dev:mobile",
-    "build": "npm run build -w @shopcount/types && npm run build -w @shopcount/api",
+    "build": "npm run build -w @shopcount/types && npm run build -w @shopcount/api && npm run build -w @shopcount/web",
     "start:api": "npm run start:prod -w @shopcount/api",
     "start:api:seed": "npm run start:prod:seed -w @shopcount/api",
     "deploy:railway": "railway up",
