@@ -13,6 +13,8 @@ import {
   approvals,
   syncEvents,
   unresolvedScans,
+  stores,
+  storeSettings,
 } from '../db/schema.js';
 import type { AuditAction, EntityType } from '@shopcount/types';
 
@@ -70,15 +72,28 @@ export async function findProducts(params: {
   q?: string;
   categoryId?: string;
   restrictedOnly?: boolean;
+  restrictedType?: string;
+  active?: boolean;
+  includeInactive?: boolean;
   limit?: number;
   offset?: number;
 }) {
-  const conditions = [eq(products.storeId, params.storeId), eq(products.active, true)];
+  const conditions = [eq(products.storeId, params.storeId)];
+  if (params.includeInactive) {
+    // no active filter
+  } else if (params.active !== undefined) {
+    conditions.push(eq(products.active, params.active));
+  } else {
+    conditions.push(eq(products.active, true));
+  }
   if (params.categoryId) conditions.push(eq(products.categoryId, params.categoryId));
   if (params.restrictedOnly) conditions.push(eq(products.restrictedCategory, true));
+  if (params.restrictedType) {
+    conditions.push(eq(products.restrictedType, params.restrictedType as typeof products.restrictedType.enumValues[number]));
+  }
   if (params.q) {
     const term = `%${params.q}%`;
-    conditions.push(or(ilike(products.name, term), ilike(products.sku, term))!);
+    conditions.push(or(ilike(products.name, term), ilike(products.sku, term), ilike(products.barcodePrimary, term))!);
   }
 
   const items = await db
@@ -183,6 +198,10 @@ export async function findAuditEvents(params: {
   entityType?: string;
   entityId?: string;
   userId?: string;
+  action?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  q?: string;
   limit?: number;
   offset?: number;
 }) {
@@ -190,6 +209,20 @@ export async function findAuditEvents(params: {
   if (params.entityType) conditions.push(eq(auditEvents.entityType, params.entityType as typeof auditEvents.entityType.enumValues[number]));
   if (params.entityId) conditions.push(eq(auditEvents.entityId, params.entityId));
   if (params.userId) conditions.push(eq(auditEvents.userId, params.userId));
+  if (params.action) conditions.push(eq(auditEvents.action, params.action as typeof auditEvents.action.enumValues[number]));
+  if (params.dateFrom) conditions.push(sql`${auditEvents.timestamp} >= ${params.dateFrom}`);
+  if (params.dateTo) conditions.push(sql`${auditEvents.timestamp} <= ${params.dateTo}`);
+  if (params.q) {
+    const term = `%${params.q}%`;
+    conditions.push(
+      or(
+        ilike(auditEvents.entityId, term),
+        ilike(auditEvents.action, term),
+        sql`${auditEvents.newValue}::text ILIKE ${term}`,
+        sql`${auditEvents.oldValue}::text ILIKE ${term}`,
+      )!,
+    );
+  }
 
   const where = conditions.length ? and(...conditions) : undefined;
 
@@ -261,6 +294,101 @@ export async function createUnresolvedScan(params: {
 }) {
   const [scan] = await db.insert(unresolvedScans).values(params).returning();
   return scan;
+}
+
+export async function findCategoryById(id: string) {
+  const [category] = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
+  return category ?? null;
+}
+
+export async function findCategoryBySlug(storeId: string, slug: string) {
+  const [category] = await db
+    .select()
+    .from(categories)
+    .where(and(eq(categories.storeId, storeId), eq(categories.slug, slug)))
+    .limit(1);
+  return category ?? null;
+}
+
+export async function findLocationById(id: string) {
+  const [location] = await db.select().from(locations).where(eq(locations.id, id)).limit(1);
+  return location ?? null;
+}
+
+export async function findProductBySku(storeId: string, sku: string) {
+  const [product] = await db
+    .select()
+    .from(products)
+    .where(and(eq(products.storeId, storeId), eq(products.sku, sku)))
+    .limit(1);
+  return product ?? null;
+}
+
+export async function setProductBarcodes(productId: string, primary: string | null | undefined, alternates: string[]) {
+  await db.delete(productBarcodes).where(eq(productBarcodes.productId, productId));
+
+  const values: Array<{ productId: string; barcode: string; isPrimary: boolean }> = [];
+  if (primary) {
+    values.push({ productId, barcode: primary, isPrimary: true });
+  }
+  for (const barcode of alternates.filter((b) => b && b !== primary)) {
+    values.push({ productId, barcode, isPrimary: false });
+  }
+  if (values.length > 0) {
+    await db.insert(productBarcodes).values(values);
+  }
+}
+
+export async function countProductsInCategory(categoryId: string) {
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(products)
+    .where(eq(products.categoryId, categoryId));
+  return count;
+}
+
+export async function findUsersByStore(storeId: string) {
+  return db.select().from(users).where(eq(users.storeId, storeId)).orderBy(users.name);
+}
+
+export async function findStoreById(id: string) {
+  const [store] = await db.select().from(stores).where(eq(stores.id, id)).limit(1);
+  return store ?? null;
+}
+
+export async function findStoreSettings(storeId: string) {
+  const [settings] = await db.select().from(storeSettings).where(eq(storeSettings.storeId, storeId)).limit(1);
+  return settings ?? null;
+}
+
+export async function getSyncHealthStats() {
+  const [pending] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(syncEvents)
+    .where(eq(syncEvents.status, 'pending'));
+
+  const [failed] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(syncEvents)
+    .where(eq(syncEvents.status, 'failed'));
+
+  const [lastSync] = await db
+    .select({ ts: syncEvents.serverTimestamp })
+    .from(syncEvents)
+    .where(eq(syncEvents.status, 'synced'))
+    .orderBy(desc(syncEvents.serverTimestamp))
+    .limit(1);
+
+  const [devices] = await db
+    .select({ count: sql<number>`count(distinct ${syncEvents.deviceId})::int` })
+    .from(syncEvents);
+
+  return {
+    pendingSyncEvents: pending?.count ?? 0,
+    failedSyncEvents: failed?.count ?? 0,
+    lastSyncAt: lastSync?.ts ?? null,
+    activeDevices: devices?.count ?? 0,
+  };
 }
 
 export async function getDashboardStats(storeId: string) {

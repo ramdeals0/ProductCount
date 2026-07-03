@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
 import pg from 'pg';
 import { hashPassword } from '../lib/password.js';
 import {
@@ -11,7 +12,10 @@ import {
   productBarcodes,
   countSessions,
   countLines,
+  storeSettings,
+  auditEvents,
 } from './schema.js';
+import { EntityType, AuditAction } from '@shopcount/types';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
@@ -56,8 +60,11 @@ async function seed() {
     if (user) insertedUsers.push(user);
   }
 
-  const manager = insertedUsers.find((u) => u.role === 'manager') ?? insertedUsers[0];
-  const staff = insertedUsers.find((u) => u.role === 'staff') ?? insertedUsers[0];
+  const allUsers = insertedUsers.length
+    ? insertedUsers
+    : await db.select().from(users).where(eq(users.storeId, storeId));
+  const managerUser = allUsers.find((u) => u.role === 'manager') ?? allUsers[0];
+  const staffUser = allUsers.find((u) => u.role === 'staff') ?? allUsers[0];
 
   const categoryData = [
     { name: 'Rice & Grains', slug: 'rice-grains', restrictedCategory: false, sortOrder: 1 },
@@ -173,8 +180,8 @@ async function seed() {
       sessionName: 'Weekly Full Count - July',
       countType: 'full',
       status: 'in_progress',
-      createdBy: staff.id,
-      assignedTo: [staff.id, manager.id],
+      createdBy: staffUser!.id,
+      assignedTo: [staffUser!.id, managerUser!.id],
       categoryIds: Object.values(catMap),
       locationIds: Object.values(locMap),
       startedAt: new Date(),
@@ -197,7 +204,7 @@ async function seed() {
       countedQty,
       varianceQty,
       variancePercent: product.expectedQty ? (varianceQty / product.expectedQty) * 100 : 0,
-      enteredBy: staff.id,
+      enteredBy: staffUser!.id,
       enteredAt: new Date(),
       requiresApproval: product.restrictedCategory && varianceQty !== 0,
     });
@@ -210,8 +217,8 @@ async function seed() {
       sessionName: 'Liquor Spot Check',
       countType: 'spot',
       status: 'review',
-      createdBy: manager.id,
-      assignedTo: [staff.id],
+      createdBy: managerUser!.id,
+      assignedTo: [staffUser!.id],
       categoryIds: [catMap['alcohol']],
       locationIds: [locMap['LIQUOR']],
       startedAt: new Date(Date.now() - 86400000),
@@ -230,11 +237,39 @@ async function seed() {
       countedQty,
       varianceQty: countedQty - product.expectedQty,
       variancePercent: ((countedQty - product.expectedQty) / product.expectedQty) * 100,
-      enteredBy: staff.id,
+      enteredBy: staffUser!.id,
       enteredAt: new Date(),
       requiresApproval: true,
       reasonCode: 'unknown_shrink',
     });
+  }
+
+  await db.insert(storeSettings).values({ storeId }).onConflictDoNothing();
+
+  if (managerUser && staffUser) {
+    await db.insert(auditEvents).values([
+      {
+        entityType: EntityType.COUNT_SESSION,
+        entityId: session.id,
+        action: AuditAction.SESSION_CREATED,
+        userId: staffUser.id,
+        newValue: { sessionName: session.sessionName },
+      },
+      {
+        entityType: EntityType.COUNT_LINE,
+        entityId: reviewSession.id,
+        action: AuditAction.LINE_COUNTED,
+        userId: staffUser.id,
+        newValue: { note: 'Liquor spot check complete' },
+      },
+      {
+        entityType: EntityType.PRODUCT,
+        entityId: insertedProducts[0]?.id ?? storeId,
+        action: AuditAction.PRODUCT_UPDATED,
+        userId: managerUser.id,
+        newValue: { action: 'seed', sku: insertedProducts[0]?.sku },
+      },
+    ]);
   }
 
   console.log('Seed complete!');
