@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - cursor/shopcount-mvp-1e85
   workflow_dispatch:
 
 concurrency:
@@ -14,6 +13,8 @@ concurrency:
 jobs:
   deploy:
     name: Deploy ShopCount API
+    # Skip when RAILWAY_TOKEN is not configured — Railway GitHub integration deploys on push to main.
+    if: ${{ secrets.RAILWAY_TOKEN != '' }}
     runs-on: ubuntu-latest
     container: ghcr.io/railwayapp/cli:latest
     env:
@@ -21,15 +22,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Validate Railway token
-        run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::error::RAILWAY_TOKEN secret is not set."
-            echo "Create a project token at https://railway.com/account/tokens"
-            echo "Then add it as a GitHub repository secret named RAILWAY_TOKEN"
-            exit 1
-          fi
 
       - name: Deploy to Railway
         run: railway up --ci --service ProductCount

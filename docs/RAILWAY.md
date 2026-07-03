@@ -4,14 +4,14 @@ This guide deploys the **ShopCount API** and **PostgreSQL** to [Railway](https:/
 
 ## Auto-deploy via GitHub Actions
 
-A workflow at `.github/workflows/deploy-railway.yml` deploys on push to `main`.
+A workflow at `.github/workflows/deploy-railway.yml` can deploy on push to `main` using the Railway CLI.
 
-**One-time setup** — add this secret to your GitHub repo (Settings → Secrets → Actions):
+**Optional** — only runs when `RAILWAY_TOKEN` is set. If the secret is missing, the workflow is skipped (not failed). Railway's own GitHub integration on the **ProductCount** service still deploys on push to `main`.
+
+**To enable GitHub Actions deploy** — add this secret to your GitHub repo (Settings → Secrets → Actions):
 
 1. In Railway: open project **shopcount-api** → **Settings** → **Tokens** → **Create Project Token**
 2. In GitHub: add secret `RAILWAY_TOKEN` with that token value
-
-Future pushes to `main` will auto-deploy.
 
 ## Option A: Deploy from GitHub (recommended)
 
