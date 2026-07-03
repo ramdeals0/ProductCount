@@ -301,8 +301,8 @@ requiresApproval = (
 |-------|-------------|--------|
 | **1** | Architecture doc, shared types, schema confirmation | ✅ Done |
 | **2** | Scaffold `apps/web`, auth, layout, product/category/location CRUD + API routes | ✅ Done |
-| **3** | Sessions, variance review, dashboard charts, audit viewer, sync health | Next |
-| **4** | Settings, seed data, tests, README run instructions | Planned |
+| **3** | Sessions, variance review, dashboard charts, audit viewer, sync health | ✅ Done |
+| **4** | Settings, seed data, tests, README run instructions | ✅ Done |
 
 ---
 

@@ -18,6 +18,10 @@ import {
   createLocationSchema,
   updateLocationSchema,
   productImportRequestSchema,
+  bulkApproveLowVarianceSchema,
+  bulkLineActionSchema,
+  updateStoreSettingsSchema,
+  updateStoreProfileSchema,
 } from '@shopcount/types';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { asyncHandler, sendSuccess, AppError } from '../lib/errors.js';
@@ -487,6 +491,54 @@ router.post(
   }),
 );
 
+router.post(
+  '/count-sessions/:sessionId/lines/:lineId/recount',
+  authenticate,
+  authorize(UserRole.MANAGER, UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const line = await services.requestRecountLine(
+      param(req.params.lineId),
+      req.user!.id,
+      req.body.notes,
+      req.headers['x-device-id'] as string,
+    );
+    sendSuccess(res, line);
+  }),
+);
+
+router.post(
+  '/count-sessions/:id/lines/bulk-approve',
+  authenticate,
+  authorize(UserRole.MANAGER, UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const options = bulkApproveLowVarianceSchema.omit({ sessionId: true }).parse(req.body);
+    const result = await services.bulkApproveLowVariance(
+      param(req.params.id),
+      req.user!.id,
+      options,
+      req.headers['x-device-id'] as string,
+    );
+    sendSuccess(res, result);
+  }),
+);
+
+router.post(
+  '/count-sessions/:id/lines/bulk-recount',
+  authenticate,
+  authorize(UserRole.MANAGER, UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const { lineIds, notes } = bulkLineActionSchema.parse(req.body);
+    const result = await services.bulkRequestRecount(
+      param(req.params.id),
+      req.user!.id,
+      lineIds,
+      notes,
+      req.headers['x-device-id'] as string,
+    );
+    sendSuccess(res, result);
+  }),
+);
+
 /**
  * @openapi
  * POST /count-sessions/:id/approve
@@ -540,6 +592,10 @@ router.get(
       entityType: req.query.entityType as string | undefined,
       entityId: req.query.entityId as string | undefined,
       userId: req.query.userId as string | undefined,
+      action: req.query.action as string | undefined,
+      q: req.query.q as string | undefined,
+      dateFrom: req.query.dateFrom ? new Date(req.query.dateFrom as string) : undefined,
+      dateTo: req.query.dateTo ? new Date(req.query.dateTo as string) : undefined,
       limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 50,
       offset: req.query.offset ? parseInt(req.query.offset as string, 10) : 0,
     });
@@ -578,6 +634,28 @@ router.get(
   }),
 );
 
+router.get(
+  '/dashboard/extended',
+  authenticate,
+  authorize(UserRole.MANAGER, UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const storeId = (req.query.storeId as string) ?? req.user!.storeId;
+    if (!storeId) throw new AppError(400, 'STORE_REQUIRED', 'Store ID is required');
+    const stats = await services.getExtendedDashboard(storeId);
+    sendSuccess(res, stats);
+  }),
+);
+
+router.get(
+  '/sync/health',
+  authenticate,
+  authorize(UserRole.MANAGER, UserRole.OWNER),
+  asyncHandler(async (_req, res) => {
+    const health = await services.getSyncHealth();
+    sendSuccess(res, health);
+  }),
+);
+
 /**
  * @openapi
  * GET /reports/variance
@@ -608,6 +686,60 @@ router.get(
     if (!storeId) throw new AppError(400, 'STORE_REQUIRED', 'Store ID is required');
     const report = await services.getLowStockReport(storeId);
     sendSuccess(res, report);
+  }),
+);
+
+router.get(
+  '/users',
+  authenticate,
+  authorize(UserRole.MANAGER, UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const storeId = (req.query.storeId as string) ?? req.user!.storeId;
+    if (!storeId) throw new AppError(400, 'STORE_REQUIRED', 'Store ID is required');
+    const list = await services.listUsers(storeId);
+    sendSuccess(res, list);
+  }),
+);
+
+router.get(
+  '/stores/:id',
+  authenticate,
+  authorize(UserRole.MANAGER, UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const profile = await services.getStoreProfile(param(req.params.id));
+    sendSuccess(res, profile);
+  }),
+);
+
+router.patch(
+  '/stores/:id',
+  authenticate,
+  authorize(UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const updates = updateStoreProfileSchema.parse(req.body);
+    const profile = await services.updateStoreProfile(param(req.params.id), updates);
+    sendSuccess(res, profile);
+  }),
+);
+
+router.get(
+  '/stores/:id/settings',
+  authenticate,
+  authorize(UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const settings = await services.getStoreSettings(param(req.params.id));
+    sendSuccess(res, settings);
+  }),
+);
+
+router.patch(
+  '/stores/:id/settings',
+  authenticate,
+  authorize(UserRole.OWNER),
+  asyncHandler(async (req, res) => {
+    const updates = updateStoreSettingsSchema.parse(req.body);
+    const settings = await services.updateStoreSettings(param(req.params.id), updates);
+    sendSuccess(res, settings);
   }),
 );
 

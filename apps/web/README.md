@@ -6,7 +6,7 @@ Internal web portal for store **owners and managers**.
 
 ```bash
 # From repo root
-cp .env.example .env          # API database + JWT
+cp .env.example .env
 npm run db:migrate && npm run db:seed
 
 # Terminal 1 — API (port 3001)
@@ -17,46 +17,49 @@ cp apps/web/.env.example apps/web/.env.local
 npm run dev:web
 ```
 
-Open http://localhost:3000 and sign in:
+Open http://localhost:3000
 
 | Role | Email | Password |
 |------|-------|----------|
 | Owner | owner@desimart.com | password123 |
 | Manager | manager@desimart.com | password123 |
 
-Staff accounts are blocked from the web app.
+Staff accounts are blocked from the web app (mobile only).
 
-## Phase 2 features
+## Features
 
-- JWT login with role guard (owner/manager only)
-- Sidebar navigation shell
-- **Products** — list, search, filters, create/edit, inline toggles, CSV export
-- **Categories** — list, create, edit, delete
-- **Locations** — list, create, edit, deactivate
-- **Dashboard** — basic metric cards from `/dashboard` API
+### Phase 2 — Catalog
+- Product list, search, filters, create/edit, CSV export, inline toggles
+- Category and location CRUD
+
+### Phase 3 — Operations
+- **Dashboard** — metric cards, Recharts (stock by category, variance, sessions, shrink), low-stock list, restricted overview, system health
+- **Sessions** — list with filters, detail with status transitions, variance review with bulk approve/recount
+- **Audit logs** — filterable trail with human-readable diffs
+
+### Phase 4 — Settings (owner)
+- Store profile (name, address, timezone)
+- Variance auto-approval thresholds
+- User list and invite
 
 ## Stack
 
-- Next.js 15 App Router + TypeScript
-- Tailwind CSS
-- TanStack Query + Zustand
-- `@shopcount/types` for shared validation types
+Next.js 15 · Tailwind · TanStack Query · Zustand · Recharts · `@shopcount/types`
 
 ## API
 
-The web app calls the shared Express API at `NEXT_PUBLIC_API_URL` (default `http://localhost:3001/api/v1`).
+Calls shared Express API at `NEXT_PUBLIC_API_URL` (default `http://localhost:3001/api/v1`).
 
-New admin endpoints (Phase 2):
+Key admin endpoints: `/dashboard/extended`, `/sync/health`, `/count-sessions/*/lines/bulk-approve`, `/stores/:id/settings`, `/users`
 
-- `POST/PATCH/DELETE /products`
-- `GET /products/export`
-- `POST /products/import` (scaffold)
-- `POST/PATCH/DELETE /categories`
-- `POST/PATCH/DELETE /locations`
+See [docs/WEB_ADMIN.md](../../docs/WEB_ADMIN.md) for architecture.
 
-See [docs/WEB_ADMIN.md](../../docs/WEB_ADMIN.md) for full architecture.
+## Run with mobile
 
-## Coming next
+```bash
+npm run dev:api     # API
+npm run dev:web     # Admin web
+npm run dev:mobile  # Expo app (uses same API)
+```
 
-- **Phase 3:** Sessions, variance review, charts, audit viewer
-- **Phase 4:** Settings, thresholds, seed enhancements, tests
+Mobile caches product catalog on login; changes in Admin appear after mobile refresh/re-login.

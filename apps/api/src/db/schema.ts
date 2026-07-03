@@ -70,8 +70,23 @@ export const stores = pgTable('stores', {
   name: text('name').notNull(),
   code: text('code').notNull().unique(),
   address: text('address'),
+  timezone: text('timezone').notNull().default('America/New_York'),
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const storeSettings = pgTable('store_settings', {
+  storeId: uuid('store_id')
+    .primaryKey()
+    .references(() => stores.id, { onDelete: 'cascade' }),
+  varianceAutoApprovePercent: real('variance_auto_approve_percent').notNull().default(10),
+  varianceAutoApprovePercentRestricted: real('variance_auto_approve_percent_restricted')
+    .notNull()
+    .default(5),
+  varianceAutoApproveQtyRestricted: real('variance_auto_approve_qty_restricted').notNull().default(2),
+  defaultCountType: countTypeEnum('default_count_type').notNull().default('cycle'),
+  notifyRestrictedVariance: boolean('notify_restricted_variance').notNull().default(true),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

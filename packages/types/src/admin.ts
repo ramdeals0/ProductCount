@@ -332,6 +332,11 @@ export interface SystemHealth {
 }
 
 export interface DashboardExtendedStats {
+  activeSessions: number;
+  pendingReview: number;
+  restrictedVariances: number;
+  lowStockItems: number;
+  syncIssues: number;
   stockByCategory: StockByCategoryRow[];
   lowStockTop10: Array<{
     productId: string;

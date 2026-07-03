@@ -14,9 +14,9 @@ import {
   type UpdateLocationInput,
   type ProductImportRequest,
 } from '@shopcount/types';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { countLines, countSessions, products, users, auditEvents, categories, locations } from '../db/schema.js';
+import { countLines, countSessions, products, users, auditEvents, categories, locations, stores, storeSettings } from '../db/schema.js';
 import { AppError } from '../lib/errors.js';
 import {
   signAccessToken,
@@ -53,7 +53,12 @@ import {
   findProductBySku,
   setProductBarcodes,
   countProductsInCategory,
+  findUsersByStore,
+  findStoreById,
+  findStoreSettings,
+  getSyncHealthStats,
 } from '../repositories/index.js';
+import { canBulkApproveLine, getDefaultBulkApproveThresholds } from '../lib/approval.js';
 
 function toAuthUser(user: typeof users.$inferSelect) {
   return {
@@ -792,12 +797,17 @@ export async function upsertCountLine(
 
 export async function getSessionLines(sessionId: string, filter?: string) {
   const lines = await findCountLines(sessionId);
+  const locList = await db.select().from(locations);
+  const locMap = new Map(locList.map((l) => [l.id, l]));
+
   const enriched = await Promise.all(
     lines.map(async (line) => {
       const product = await findProductById(line.productId);
+      const loc = locMap.get(line.locationId);
       return {
         ...serializeCountLine(line),
         product: product ? serializeProduct(product) : undefined,
+        location: loc ? serializeLocation(loc) : undefined,
         restrictedCategory: product?.restrictedCategory ?? false,
       };
     }),
@@ -867,8 +877,23 @@ export async function recordUnresolvedScan(params: {
 
 export async function getAuditHistory(params: Parameters<typeof findAuditEvents>[0]) {
   const result = await findAuditEvents(params);
+  const userMap = new Map<string, string>();
+
+  const items = await Promise.all(
+    result.items.map(async (e) => {
+      if (!userMap.has(e.userId)) {
+        const u = await findUserById(e.userId);
+        userMap.set(e.userId, u?.name ?? e.userId);
+      }
+      return {
+        ...serializeAuditEvent(e),
+        userName: userMap.get(e.userId),
+      };
+    }),
+  );
+
   return {
-    items: result.items.map(serializeAuditEvent),
+    items,
     total: result.total,
     limit: params.limit ?? 50,
     offset: params.offset ?? 0,
@@ -1086,6 +1111,300 @@ export function requireRole(userRole: string, allowed: string[]) {
   if (!allowed.includes(userRole)) {
     throw new AppError(403, 'FORBIDDEN', 'Insufficient permissions');
   }
+}
+
+export async function requestRecountLine(lineId: string, userId: string, notes?: string, deviceId?: string) {
+  const line = await findCountLineById(lineId);
+  if (!line) throw new AppError(404, 'LINE_NOT_FOUND', 'Count line not found');
+
+  const [updated] = await db
+    .update(countLines)
+    .set({ requiresApproval: true, note: notes ?? line.note, updatedAt: new Date() })
+    .where(eq(countLines.id, lineId))
+    .returning();
+
+  await createAuditEvent({
+    entityType: EntityType.COUNT_LINE,
+    entityId: lineId,
+    action: AuditAction.RECOUNT_REQUESTED,
+    userId,
+    deviceId,
+    newValue: { recountRequested: true, notes },
+  });
+
+  return serializeCountLine(updated);
+}
+
+export async function bulkApproveLowVariance(
+  sessionId: string,
+  userId: string,
+  options: {
+    maxVariancePercent?: number;
+    maxVarianceQty?: number;
+    excludeRestricted?: boolean;
+    lineIds?: string[];
+  },
+  deviceId?: string,
+) {
+  const session = await findSessionById(sessionId);
+  if (!session) throw new AppError(404, 'SESSION_NOT_FOUND', 'Count session not found');
+
+  const settings = session.storeId ? await findStoreSettings(session.storeId) : null;
+  const thresholds = getDefaultBulkApproveThresholds(settings ?? undefined);
+  if (options.maxVariancePercent !== undefined) thresholds.maxVariancePercent = options.maxVariancePercent;
+  if (options.maxVarianceQty !== undefined) thresholds.maxVarianceQty = options.maxVarianceQty;
+  if (options.excludeRestricted !== undefined) thresholds.excludeRestricted = options.excludeRestricted;
+
+  const lines = await findCountLines(sessionId);
+  const targetLines = options.lineIds
+    ? lines.filter((l) => options.lineIds!.includes(l.id))
+    : lines;
+
+  let approved = 0;
+  let skipped = 0;
+
+  for (const line of targetLines) {
+    const product = await findProductById(line.productId);
+    const eligible = canBulkApproveLine(
+      {
+        id: line.id,
+        varianceQty: line.varianceQty,
+        variancePercent: line.variancePercent,
+        requiresApproval: line.requiresApproval,
+        approved: line.approved,
+        restrictedCategory: product?.restrictedCategory,
+      },
+      thresholds,
+    );
+
+    if (!eligible) {
+      skipped++;
+      continue;
+    }
+
+    await approveLine(line.id, userId, 'Bulk low-variance approval', deviceId);
+    approved++;
+  }
+
+  return { approved, skipped, total: targetLines.length };
+}
+
+export async function bulkRequestRecount(
+  sessionId: string,
+  userId: string,
+  lineIds: string[],
+  notes?: string,
+  deviceId?: string,
+) {
+  let requested = 0;
+  for (const lineId of lineIds) {
+    const line = await findCountLineById(lineId);
+    if (!line || line.sessionId !== sessionId) continue;
+    await requestRecountLine(lineId, userId, notes, deviceId);
+    requested++;
+  }
+  return { requested };
+}
+
+export async function getSyncHealth() {
+  const stats = await getSyncHealthStats();
+  return {
+    lastSyncAt: stats.lastSyncAt?.toISOString() ?? null,
+    pendingSyncEvents: stats.pendingSyncEvents,
+    failedSyncEvents: stats.failedSyncEvents,
+    activeDevices: stats.activeDevices,
+  };
+}
+
+export async function getExtendedDashboard(storeId: string) {
+  const basic = await getDashboardStats(storeId);
+  const cats = await findCategories(storeId);
+  const allProducts = await db.select().from(products).where(eq(products.storeId, storeId));
+  const sessions = await findSessions(storeId);
+
+  const stockByCategory = cats.map((c) => {
+    const catProducts = allProducts.filter((p) => p.categoryId === c.id && p.active);
+    return {
+      categoryId: c.id,
+      categoryName: c.name,
+      productCount: catProducts.length,
+      totalUnits: catProducts.reduce((s, p) => s + p.expectedQty, 0),
+      lowStockCount: catProducts.filter((p) => p.expectedQty <= p.reorderLevel).length,
+    };
+  });
+
+  const lowStockTop10 = allProducts
+    .filter((p) => p.active && p.expectedQty <= p.reorderLevel)
+    .sort((a, b) => a.expectedQty - b.expectedQty)
+    .slice(0, 10)
+    .map((p) => ({
+      productId: p.id,
+      name: p.name,
+      sku: p.sku,
+      expectedQty: p.expectedQty,
+      reorderLevel: p.reorderLevel,
+    }));
+
+  const sessionsByStatus = ['draft', 'in_progress', 'review', 'approved', 'posted'].map((status) => ({
+    status,
+    count: sessions.filter((s) => s.status === status).length,
+  }));
+
+  const varianceReport = await getVarianceReport(storeId);
+  const varianceByCategory = varianceReport.map((r) => ({
+    categoryId: r.categoryId,
+    categoryName: r.categoryName,
+    shortageUnits: r.totalVariance < 0 ? Math.abs(r.totalVariance) : 0,
+    overageUnits: r.totalVariance > 0 ? r.totalVariance : 0,
+  }));
+
+  const restrictedProducts = allProducts.filter((p) => p.restrictedCategory);
+  const sessionIds = sessions.map((s) => s.id);
+  const allLines = sessionIds.length
+    ? await db.select().from(countLines).where(inArray(countLines.sessionId, sessionIds))
+    : [];
+
+  const recentHighVariance = allLines
+    .filter((l) => {
+      const p = allProducts.find((pr) => pr.id === l.productId);
+      return p?.restrictedCategory && l.varianceQty !== null && Math.abs(l.varianceQty) >= 2;
+    })
+    .slice(0, 5)
+    .map((l) => {
+      const p = allProducts.find((pr) => pr.id === l.productId)!;
+      const s = sessions.find((sess) => sess.id === l.sessionId)!;
+      return {
+        productId: p.id,
+        productName: p.name,
+        sku: p.sku,
+        varianceQty: l.varianceQty ?? 0,
+        sessionId: s.id,
+        sessionName: s.sessionName,
+      };
+    });
+
+  const shrinkByReason = new Map<string, { lineCount: number; totalVarianceQty: number }>();
+  for (const line of allLines) {
+    if (!line.reasonCode || line.varianceQty === null) continue;
+    const entry = shrinkByReason.get(line.reasonCode) ?? { lineCount: 0, totalVarianceQty: 0 };
+    entry.lineCount++;
+    entry.totalVarianceQty += line.varianceQty;
+    shrinkByReason.set(line.reasonCode, entry);
+  }
+
+  const systemHealth = await getSyncHealth();
+
+  return {
+    ...basic,
+    stockByCategory,
+    lowStockTop10,
+    varianceTrend: [],
+    varianceByCategory,
+    shrinkByReason: Array.from(shrinkByReason.entries()).map(([reasonCode, data]) => ({
+      reasonCode,
+      ...data,
+    })),
+    sessionsByStatus,
+    restrictedOverview: {
+      alcoholCount: restrictedProducts.filter((p) => p.restrictedType === 'alcohol').length,
+      tobaccoCount: restrictedProducts.filter((p) => p.restrictedType === 'tobacco').length,
+      recentHighVariance,
+    },
+    systemHealth,
+  };
+}
+
+export async function listUsers(storeId: string) {
+  const list = await findUsersByStore(storeId);
+  return list.map((u) => ({
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role,
+    active: u.active,
+    storeId: u.storeId,
+    createdAt: u.createdAt.toISOString(),
+  }));
+}
+
+export async function getStoreProfile(storeId: string) {
+  const store = await findStoreById(storeId);
+  if (!store) throw new AppError(404, 'STORE_NOT_FOUND', 'Store not found');
+  return {
+    id: store.id,
+    name: store.name,
+    code: store.code,
+    address: store.address,
+    timezone: store.timezone,
+    active: store.active,
+  };
+}
+
+export async function updateStoreProfile(storeId: string, updates: { name?: string; address?: string | null; timezone?: string }) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (updates.name !== undefined) patch.name = updates.name;
+  if (updates.address !== undefined) patch.address = updates.address;
+  if (updates.timezone !== undefined) patch.timezone = updates.timezone;
+  const [store] = await db
+    .update(stores)
+    .set(patch as typeof stores.$inferInsert)
+    .where(eq(stores.id, storeId))
+    .returning();
+  return {
+    id: store.id,
+    name: store.name,
+    code: store.code,
+    address: store.address,
+    timezone: store.timezone,
+    active: store.active,
+  };
+}
+
+export async function getStoreSettings(storeId: string) {
+  let settings = await findStoreSettings(storeId);
+  if (!settings) {
+    [settings] = await db.insert(storeSettings).values({ storeId }).returning();
+  }
+  return serializeStoreSettings(settings);
+}
+
+export async function updateStoreSettings(
+  storeId: string,
+  updates: Partial<{
+    varianceAutoApprovePercent: number;
+    varianceAutoApprovePercentRestricted: number;
+    varianceAutoApproveQtyRestricted: number;
+    defaultCountType: 'full' | 'cycle' | 'spot';
+    notifyRestrictedVariance: boolean;
+  }>,
+) {
+  const existing = await findStoreSettings(storeId);
+  const { storeId: _omit, ...patch } = updates as typeof storeSettings.$inferInsert & { storeId?: string };
+  if (!existing) {
+    const [created] = await db
+      .insert(storeSettings)
+      .values({ storeId, ...patch })
+      .returning();
+    return serializeStoreSettings(created);
+  }
+  const [updated] = await db
+    .update(storeSettings)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(storeSettings.storeId, storeId))
+    .returning();
+  return serializeStoreSettings(updated);
+}
+
+function serializeStoreSettings(s: typeof storeSettings.$inferSelect) {
+  return {
+    storeId: s.storeId,
+    varianceAutoApprovePercent: s.varianceAutoApprovePercent,
+    varianceAutoApprovePercentRestricted: s.varianceAutoApprovePercentRestricted,
+    varianceAutoApproveQtyRestricted: s.varianceAutoApproveQtyRestricted,
+    defaultCountType: s.defaultCountType,
+    notifyRestrictedVariance: s.notifyRestrictedVariance,
+    updatedAt: s.updatedAt.toISOString(),
+  };
 }
 
 export { UserRole };
